@@ -1,10 +1,10 @@
 import logging
 import os
 import time
-from http import HTTPStatus
-
 import requests
 import telegram
+
+from http import HTTPStatus
 from dotenv import load_dotenv
 from logging.handlers import RotatingFileHandler
 
@@ -30,7 +30,6 @@ HOMEWORK_VERDICTS = {
 }
 
 logger = logging.getLogger(__name__)
-logger.addHandler(logging.StreamHandler())
 
 
 def check_tokens():
@@ -38,7 +37,6 @@ def check_tokens():
     for token in [PRACTICUM_TOKEN, TELEGRAM_TOKEN, TELEGRAM_CHAT_ID]:
         if not token:
             logger.critical(
-                f'Программа остановлена.'
                 f'Отсутствует обязательная переменная окружения {token}.'
             )
             raise SystemExit
@@ -49,9 +47,9 @@ def send_message(bot, message):
     try:
         bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
         logger.debug(f'Сообщение в Telegram отправлено: {message}')
-    except Exception:
-        logger.error(f'Сообщение в {message} не отправлено.')
-        raise Exception(f'Сообщение в {message} не отправлено.')
+    except Exception as error:
+        logger.error(f'Ошибка при отправке сообщения {error}')
+        raise Exception(error)
 
 
 def get_api_answer(current_timestamp):
@@ -59,16 +57,15 @@ def get_api_answer(current_timestamp):
     params = {'from_date': current_timestamp}
     try:
         response = requests.get(ENDPOINT, headers=HEADERS, params=params)
-    except requests.exceptions.RequestException as error:
-        error_message = f'Код ответа API: {error}'
-        logger.error(error_message)
-        raise requests.exceptions.RequestException(error_message)
+    except requests.exceptions.RequestException:
+        raise requests.exceptions.RequestException(
+            'Не удалось получить ответ API'
+        )
     finally:
         if response.status_code != HTTPStatus.OK:
             error_message = (
                 f'Эндпоинт не доступен, статус: {response.status_code}'
             )
-            logger.error(error_message)
             raise requests.exceptions.HTTPError(error_message)
     return response.json()
 
@@ -76,28 +73,25 @@ def get_api_answer(current_timestamp):
 def check_response(response):
     """Проверяет содержимое ответа от API."""
     if not isinstance(response, dict):
-        error_text = (
+        error_message = (
             f'Тип ответа от api не dict. Неверный тип: {type(response)}'
         )
-        logger.error(error_text)
-        raise TypeError(error_text)
+        raise TypeError(error_message)
     if HOMEWORKS not in response:
-        error_text = 'В ответе от API нет объекта homeworks'
-        logger.error(error_text)
-        raise TypeError(error_text)
+        error_message = 'В ответе от API нет объекта homeworks'
+        raise KeyError(error_message)
     if not isinstance(response[HOMEWORKS], list):
-        error_text = 'Объект ответа homeworks не является списком'
-        logger.error(error_text)
-        raise TypeError(error_text)
+        error_message = 'Объект ответа homeworks не является списком'
+        raise TypeError(error_message)
     return response[HOMEWORKS]
 
 
 def parse_status(homework):
     """Проверяет не изменился ли статус."""
     if HOMEWORK_NAME not in homework:
-        raise KeyError('В домашней работе отсутствует объект homework_name')
+        raise KeyError('Ключ homework_name отсутствует в homework')
     if STATUS not in homework:
-        raise Exception('В домашней работе отсутствует объект status')
+        raise KeyError('Ключ status отсутствует в homework')
     homework_name = homework[HOMEWORK_NAME]
     homework_status = homework[STATUS]
     if homework_status not in HOMEWORK_VERDICTS:
@@ -111,24 +105,27 @@ def main():
     if not check_tokens():
         bot = telegram.Bot(token=TELEGRAM_TOKEN)
         current_timestamp = int(time.time())
+        previos_message = ''
 
-    while True:
-        try:
-            response = get_api_answer(current_timestamp)
-            homework = check_response(response)[0]
-            message = parse_status(homework)
-            send_message(bot, message)
-            logging.info(homework)
-            current_timestamp = response.get('current_date')
-        except IndexError:
-            send_message(bot, message)
-            logging.info('Статус работы не изменился')
-        except Exception as error:
-            message = f'Сбой в работе программы: {error}'
-            send_message(bot, message)
-        finally:
-            time.sleep(RETRY_PERIOD)
-        logging.info(f'Сообщение {message} отправлено'.format(message))
+        while True:
+            try:
+                response = get_api_answer(current_timestamp)
+                homework = check_response(response)[0]
+                message = parse_status(homework)
+                if previos_message != message:
+                    send_message(bot, message)
+                    message = previos_message
+                else:
+                    logging.info('Статус работы не изменился')
+            except Exception as error:
+                message = f'Сбой в работе программы: {error}'
+                send_message(bot, message)
+            finally:
+                time.sleep(RETRY_PERIOD)
+            logging.info(f'Сообщение {message} отправлено'.format(message))
+    else:
+        error_message = 'Необходимые токены отсутствуют!'
+        logging.error(error_message)
 
 
 if __name__ == '__main__':
@@ -143,6 +140,6 @@ if __name__ == '__main__':
         mode='a',
         maxBytes=50000,
         backupCount=5
-    )
+    ), logging.StreamHandler()
 
     main()
