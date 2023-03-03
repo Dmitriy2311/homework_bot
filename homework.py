@@ -34,8 +34,19 @@ logger = logging.getLogger(__name__)
 
 def check_tokens():
     """Проверяет токены."""
-    if all([PRACTICUM_TOKEN, TELEGRAM_TOKEN, TELEGRAM_CHAT_ID]):
-        return True
+    tokens = {
+        'PRACTICUM_TOKEN': PRACTICUM_TOKEN,
+        'TELEGRAM_TOKEN': TELEGRAM_TOKEN,
+        'CHAT_ID': TELEGRAM_CHAT_ID,
+    }
+    for description, token in tokens.items():
+        if token is None:
+            logger.critical(
+                f'Отсутствует обязательная переменная окружения {description}.'
+            )
+            return False
+        else:
+            return True
 
 
 def send_message(bot, message):
@@ -57,10 +68,7 @@ def get_api_answer(current_timestamp):
     try:
         response = requests.get(ENDPOINT, headers=HEADERS, params=params)
     except Exception as error:
-        logging.error(
-            f'Ошибка при запросе к основному API: {error}'
-        )
-        raise Exception(
+        raise requests.exceptions.RequestException(
             f'Ошибка при запросе к основному API: {error}'
         )
     finally:
@@ -85,7 +93,7 @@ def check_response(response):
     homeworks_list = response[HOMEWORKS]
     if not isinstance(homeworks_list, list):
         raise TypeError(
-            'Объект ответа homeworks не является списком'
+            f'Объект ответа homeworks не является списком {type(response)}'
         )
     return homeworks_list
 
@@ -103,7 +111,7 @@ def parse_status(homework):
     homework_name = homework[HOMEWORK_NAME]
     homework_status = homework[STATUS]
     if homework_status not in HOMEWORK_VERDICTS:
-        raise Exception(
+        raise KeyError(
             f'Неизвестный статус: {homework_status}'
         )
     verdict = HOMEWORK_VERDICTS[homework_status]
